@@ -457,4 +457,370 @@ class YoutubeViewModel(application: Application) : AndroidViewModel(application)
             )
         }
     }
+
+    // --- Video Generation Tool integration states ---
+    var isDraftingSessionActive by mutableStateOf(false)
+    var activeDraftVideoEntity by mutableStateOf<VideoEntity?>(null)
+    var activeDraftScenes by mutableStateOf<List<VideoDraftScene>>(emptyList())
+    var isGeneratingDrafts by mutableStateOf(false)
+    var draftGenerationProgress by mutableStateOf(0f)
+    var selectedDraftStyle by mutableStateOf("Hyper-realistic Cinema")
+    var selectedDraftMusic by mutableStateOf("Vibrant Tech Synth")
+    var isVideoDraftCompiled by mutableStateOf(false)
+    var isDraftMusicPlaying by mutableStateOf(false)
+    var activeDraftTimeCursor by mutableStateOf(0L) // simulated timeline position in milliseconds
+
+    fun openDraftingStudio(video: VideoEntity) {
+        activeDraftVideoEntity = video
+        isDraftingSessionActive = true
+        isVideoDraftCompiled = false
+        isDraftMusicPlaying = false
+        activeDraftTimeCursor = 0L
+        
+        // Parse the script into dynamic storyboard scene drafts
+        val parsed = parseScriptToDraftScenes(video.script)
+        activeDraftScenes = if (parsed.isNotEmpty()) parsed else listOf(
+            VideoDraftScene("sc1", "0:00 - 0:10", "Introduction to: ${video.trendingTopic}", "Close shot of YouTube interface"),
+            VideoDraftScene("sc2", "0:10 - 0:30", "Deep explanation of niche topic: ${video.niche}", "AI concept art with binary overlays"),
+            VideoDraftScene("sc3", "0:30 - 1:00", "Actionable visual summary & CTA", "High-contrast end frame subscription button slider")
+        )
+    }
+
+    fun closeDraftingStudio() {
+        isDraftingSessionActive = false
+        activeDraftVideoEntity = null
+        isDraftMusicPlaying = false
+    }
+
+    fun generateVideoVisualDrafts() {
+        if (isGeneratingDrafts) return
+        isGeneratingDrafts = true
+        draftGenerationProgress = 0f
+        isVideoDraftCompiled = false
+        
+        viewModelScope.launch {
+            val video = activeDraftVideoEntity ?: return@launch
+            
+            repository.log(
+                agent = "Designer",
+                level = "INFO",
+                message = "AI Video Generation Tool Handshake Initiated.",
+                details = "Topic: '${video.trendingTopic}'\\nTarget Style: $selectedDraftStyle\\nScene Elements Space size: ${activeDraftScenes.size} scenes."
+            )
+            
+            val updatedScenes = activeDraftScenes.mapIndexed { idx, scene ->
+                delay(1200) // Simulating frame drawing
+                draftGenerationProgress = (idx + 1).toFloat() / activeDraftScenes.size
+                
+                val seedPrompt = "${video.niche} ${scene.brollSuggestion}, style: $selectedDraftStyle, high fidelity, vivid colors"
+                val imageUrl = getDraftSceneThematicImage(seedPrompt, video.niche, selectedDraftStyle)
+                
+                repository.log(
+                    agent = "Designer",
+                    level = "INFO",
+                    message = "Synthesized Video Draft Frame for Scene #${idx + 1} ('${scene.timestamp}')",
+                    details = "Prompt used: $seedPrompt\\nResolved Draft Frame URL: $imageUrl"
+                )
+                
+                scene.copy(frameUrl = imageUrl, visualStyleApplied = selectedDraftStyle)
+            }
+            
+            activeDraftScenes = updatedScenes
+            isVideoDraftCompiled = true
+            isGeneratingDrafts = false
+            draftGenerationProgress = 1.0f
+            
+            repository.log(
+                agent = "Publisher",
+                level = "INFO",
+                message = "Full Video visual drafts pipeline compiled successfully!",
+                details = "Stitched ${updatedScenes.size} frames with dynamic soundtrack '$selectedDraftMusic'. Draft is fully renderable in dashboard player preview."
+            )
+        }
+    }
+
+    private fun getDraftSceneThematicImage(prompt: String, niche: String, style: String): String {
+        val techList = listOf(
+            "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&q=80&w=700"
+        )
+        val financeList = listOf(
+            "https://images.unsplash.com/photo-1559526324-4b87b5e36e44?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?auto=format&fit=crop&q=80&w=700"
+        )
+        val designList = listOf(
+            "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1561070791-26c113006238?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1558655146-d09347e92766?auto=format&fit=crop&q=80&w=700"
+        )
+        val genericList = listOf(
+            "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1536240478700-b869070f9279?auto=format&fit=crop&q=80&w=700",
+            "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&q=80&w=700"
+        )
+
+        val lowerNiche = niche.lowercase()
+        val list = when {
+            lowerNiche.contains("tech") || lowerNiche.contains("saas") || lowerNiche.contains("space") -> techList
+            lowerNiche.contains("money") || lowerNiche.contains("secret") || lowerNiche.contains("market") -> financeList
+            lowerNiche.contains("horror") || lowerNiche.contains("trivia") -> designList
+            else -> genericList
+        }
+        val seed = Math.abs(prompt.hashCode())
+        return list[seed % list.size]
+    }
+
+    // --- Social Media Sharing Integration states ---
+    var isSharingSessionActive by mutableStateOf(false)
+    var activeSharingVideoEntity by mutableStateOf<VideoEntity?>(null)
+    var selectedSharingPlatforms by mutableStateOf(setOf("Twitter/X", "Facebook", "Reddit"))
+    
+    var twitterPostCopy by mutableStateOf("")
+    var facebookPostCopy by mutableStateOf("")
+    var redditPostCopy by mutableStateOf("")
+    var redditPostTitle by mutableStateOf("")
+    var redditSubreddit by mutableStateOf("r/videos")
+    
+    var isGeneratingSocialPosts by mutableStateOf(false)
+    var isSocialPostingInProgress by mutableStateOf(false)
+    var socialPostingProgress by mutableStateOf(0f)
+    var currentPostingPlatform by mutableStateOf("")
+    var successfulSharedLogs by mutableStateOf<List<String>>(emptyList())
+
+    fun openSharingStudio(video: VideoEntity) {
+        activeSharingVideoEntity = video
+        isSharingSessionActive = true
+        isSocialPostingInProgress = false
+        socialPostingProgress = 0f
+        currentPostingPlatform = ""
+        successfulSharedLogs = emptyList()
+        selectedSharingPlatforms = setOf("Twitter/X", "Facebook", "Reddit")
+        
+        generateSocialPostsCopy(video)
+    }
+
+    fun closeSharingStudio() {
+        isSharingSessionActive = false
+        activeSharingVideoEntity = null
+    }
+
+    fun toggleSharingPlatform(platform: String) {
+        selectedSharingPlatforms = if (selectedSharingPlatforms.contains(platform)) {
+            selectedSharingPlatforms - platform
+        } else {
+            selectedSharingPlatforms + platform
+        }
+    }
+
+    fun generateSocialPostsCopy(video: VideoEntity) {
+        viewModelScope.launch {
+            isGeneratingSocialPosts = true
+            delay(1000) // Aesthetic delay for AI synthesis scanning
+            val title = if (video.optimizedTitle.isNotEmpty()) video.optimizedTitle else video.trendingTopic
+            
+            // Twitter/X Copy: punchy hook, key point outline, standard action link
+            twitterPostCopy = "🚀 NEW VIDEO ALERT!\n\n\"$title\"\n\nEver wanted to solve the mystery behind the ${video.niche}? Here is a quick 3-minute breakdown of the absolute essentials!\n\n👇 Full video in comments!\n#${video.niche.replace(" ", "").replace("&", "")} #youtube #trends"
+            
+            // Facebook Copy: engaging conversational tone
+            facebookPostCopy = "🎬 Freshly customized and published YouTube topic: \"$title\"!\n\nWe deep-dive into the secrets of the ${video.niche} to figure out what's working right now. Check out the storyboard structure, scripts, and production cues we used to optimize this.\n\nLet us know in the comments if you have any questions! 🚀\n\n📺 Video watch link in first comment or bio.\n#contentcreator #automation #marketing"
+            
+            // Reddit Subreddit Recommendation based on Niche keyword matching
+            val lowerNiche = video.niche.lowercase()
+            redditSubreddit = when {
+                lowerNiche.contains("tech") || lowerNiche.contains("saas") || lowerNiche.contains("dev") -> "r/technology"
+                lowerNiche.contains("money") || lowerNiche.contains("wealth") || lowerNiche.contains("finance") || lowerNiche.contains("stock") -> "r/personalfinance"
+                lowerNiche.contains("horror") || lowerNiche.contains("spooky") || lowerNiche.contains("scary") -> "r/horror"
+                lowerNiche.contains("trivia") || lowerNiche.contains("fun") || lowerNiche.contains("fact") -> "r/todayilearned"
+                else -> "r/videos"
+            }
+            
+            redditPostTitle = "How we automated a complete visual video on '$title' using AI agents"
+            redditPostCopy = "We recently set up an AI agent workflow targeting the **${video.niche}** niche. \n\nOur system produced research coordinates, drafted full-length timelines, generated cinematic image frames, and optimized YouTube descriptions automatically.\n\nHere's the visual prompt layout or insights we logged:\n- **Niche Focus**: ${video.niche}\n- **Core Topic**: ${video.trendingTopic}\n\nWhat are your thoughts on agentic content publishing workflows? Do they save meaningful time for video teams, or do they reduce authentic value?"
+            
+            isGeneratingSocialPosts = false
+        }
+    }
+
+    fun publishSocialPosts() {
+        if (isSocialPostingInProgress) return
+        val video = activeSharingVideoEntity ?: return
+        val platformsToPost = selectedSharingPlatforms.toList()
+        if (platformsToPost.isEmpty()) return
+        
+        isSocialPostingInProgress = true
+        socialPostingProgress = 0f
+        
+        viewModelScope.launch {
+            val shareHistory = mutableListOf<String>()
+            if (video.sharedPlatforms.isNotEmpty()) {
+                shareHistory.addAll(video.sharedPlatforms.split(", "))
+            }
+            
+            platformsToPost.forEachIndexed { index, platform ->
+                currentPostingPlatform = platform
+                // Simulate publishing latency for security handshakes, metadata uploads, api response waits
+                val steps = 5
+                for (step in 1..steps) {
+                    delay(500)
+                    socialPostingProgress = (index.toFloat() + (step.toFloat() / steps)) / platformsToPost.size
+                }
+                
+                shareHistory.add(platform)
+                
+                val postSampleText = when (platform) {
+                    "Twitter/X" -> twitterPostCopy
+                    "Facebook" -> facebookPostCopy
+                    "Reddit" -> "[$redditSubreddit] $redditPostTitle"
+                    else -> ""
+                }
+                
+                repository.log(
+                    agent = "Publisher",
+                    level = "INFO",
+                    message = "Successfully micro-blogged video post update to $platform!",
+                    details = "Platform: $platform\\nContent Length: ${postSampleText.length} characters.\\nSample:\\n\"$postSampleText\""
+                )
+            }
+            
+            // Mark as shared in database
+            val distinctShares = shareHistory.distinct().joinToString(", ")
+            val updatedVideo = video.copy(sharedPlatforms = distinctShares)
+            repository.updateVideo(updatedVideo)
+            activeSharingVideoEntity = updatedVideo
+            
+            isSocialPostingInProgress = false
+            currentPostingPlatform = ""
+            successfulSharedLogs = platformsToPost
+            
+            repository.log(
+                agent = "Publisher",
+                level = "INFO",
+                message = "Social syndication complete for video: '${video.optimizedTitle.ifEmpty { video.trendingTopic }}'",
+                details = "Successfully cross-posted to channels: $distinctShares"
+            )
+        }
+    }
+}
+
+data class VideoDraftScene(
+    val id: String,
+    val timestamp: String,
+    val narration: String,
+    val brollSuggestion: String,
+    val frameUrl: String = "",
+    val visualStyleApplied: String = ""
+)
+
+fun parseScriptToDraftScenes(scriptText: String): List<VideoDraftScene> {
+    val scenes = mutableListOf<VideoDraftScene>()
+    if (scriptText.isBlank()) return scenes
+
+    try {
+        val trimmed = scriptText.trim()
+        val json = if (trimmed.startsWith("{")) {
+            org.json.JSONObject(trimmed)
+        } else {
+            val startIdx = trimmed.indexOf("{")
+            val endIdx = trimmed.lastIndexOf("}")
+            if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+                org.json.JSONObject(trimmed.substring(startIdx, endIdx + 1))
+            } else {
+                null
+            }
+        }
+
+        if (json != null) {
+            val scriptArray = when {
+                json.has("script") -> json.get("script")
+                json.has("shorts") -> json.get("shorts")
+                else -> null
+            }
+            if (scriptArray is org.json.JSONArray) {
+                for (i in 0 until scriptArray.length()) {
+                    val item = scriptArray.getJSONObject(i)
+                    scenes.add(
+                        VideoDraftScene(
+                            id = "json_$i",
+                            timestamp = item.optString("timestamp", "00:${String.format("%02d", i * 15)}"),
+                            narration = item.optString("narration", ""),
+                            brollSuggestion = item.optString("visual_broll", item.optString("broll", "Illustrative clip showing scene context.")),
+                            frameUrl = ""
+                        )
+                    )
+                }
+            }
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("ScriptToDraftScenes", "Failed JSON parse, fallback to text parser", e)
+    }
+
+    if (scenes.isEmpty()) {
+        val sections = scriptText.split(Regex("(?=\\[\\d+:\\d+)"))
+        var idx = 0
+        for (sec in sections) {
+            val trimmedSec = sec.trim()
+            if (trimmedSec.isNotEmpty()) {
+                val timestampPart = trimmedSec.substringBefore("]", "").removePrefix("[").trim()
+                val timestamp = if (timestampPart.contains(":") || timestampPart.contains("-")) {
+                    timestampPart
+                } else {
+                    "0:${String.format("%02d", idx * 15)}"
+                }
+
+                var visual = "High quality themed illustration clip"
+                var narration = ""
+
+                val lines = trimmedSec.split("\n")
+                for (line in lines) {
+                    val l = line.trim()
+                    if (l.startsWith("VISUAL:", ignoreCase = true)) {
+                        visual = l.substringAfter("VISUAL:", "").trim()
+                    } else if (l.startsWith("NARRATOR:", ignoreCase = true)) {
+                        narration = l.substringAfter("NARRATOR:", "").trim().removeSurrounding("\"")
+                    } else if (l.startsWith("NARRATION:", ignoreCase = true)) {
+                        narration = l.substringAfter("NARRATION:", "").trim().removeSurrounding("\"")
+                    } else if (l.isNotEmpty() && !l.startsWith("[") && narration.isEmpty()) {
+                        if (!l.startsWith("VISUAL:", ignoreCase = true) && !l.startsWith("AUDIO:", ignoreCase = true)) {
+                            narration = l
+                        }
+                    }
+                }
+
+                if (narration.isNotEmpty() || visual.isNotEmpty()) {
+                    scenes.add(
+                        VideoDraftScene(
+                            id = "txt_$idx",
+                            timestamp = timestamp,
+                            narration = if (narration.isNotEmpty()) narration else "No verbal cue, dynamic background audio track.",
+                            brollSuggestion = visual,
+                            frameUrl = ""
+                        )
+                    )
+                    idx++
+                }
+            }
+        }
+    }
+
+    if (scenes.isEmpty()) {
+        val paras = scriptText.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }
+        paras.forEachIndexed { i, p ->
+            if (!p.startsWith("🎬") && !p.startsWith("---")) {
+                scenes.add(
+                    VideoDraftScene(
+                        id = "fallback_$i",
+                        timestamp = "00:${String.format("%02d", i * 15)}",
+                        narration = p.replace(Regex("\\[.*?\\]"), "").trim(),
+                        brollSuggestion = "Thematic imagery representing: ${p.take(40)}...",
+                        frameUrl = ""
+                    )
+                )
+            }
+        }
+    }
+
+    return scenes
 }

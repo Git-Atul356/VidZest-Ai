@@ -27,7 +27,10 @@ data class VideoEntity(
     val views: Long = 0,
     val watchTimeMinutes: Long = 0,
     val likes: Long = 0,
-    val subscribersGained: Long = 0
+    val subscribersGained: Long = 0,
+    
+    // Social Sharing integration state
+    val sharedPlatforms: String = ""
 )
 
 @Entity(tableName = "logs")

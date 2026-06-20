@@ -1,9 +1,12 @@
 package com.example.ui.components
 
+import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,7 +19,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -33,6 +44,9 @@ fun MonthlyCalendarView(
     videos: List<VideoEntity>,
     selectedDate: Calendar,
     onDateSelected: (Calendar) -> Unit,
+    draggedVideo: VideoEntity? = null,
+    dragPosition: Offset = Offset.Zero,
+    onHoverDay: (Int?, Int?, Int?) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var currentDisplayMonth by remember(selectedDate) { mutableStateOf(selectedDate.get(Calendar.MONTH)) }
@@ -157,8 +171,39 @@ fun MonthlyCalendarView(
                                     selectedDate.get(Calendar.MONTH) == currentDisplayMonth &&
                                     selectedDate.get(Calendar.DAY_OF_MONTH) == dayNumber
 
-                            val bgSelected = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-                            val borderSelected = if (isSelected) Color.Transparent else MaterialTheme.colorScheme.outlineVariant
+                            // Drag & Drop hover coordinates tracking
+                            var cellCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+                            val isCurrentlyHovered = remember(dragPosition, cellCoords) {
+                                cellCoords?.let { coords ->
+                                    if (coords.isAttached && dragPosition != Offset.Zero) {
+                                        val windowPos = coords.localToWindow(Offset.Zero)
+                                        val size = coords.size
+                                        dragPosition.x >= windowPos.x &&
+                                                dragPosition.x <= windowPos.x + size.width &&
+                                                dragPosition.y >= windowPos.y &&
+                                                dragPosition.y <= windowPos.y + size.height
+                                    } else false
+                                } ?: false
+                            }
+
+                            // Trigger parent hover updates
+                            LaunchedEffect(isCurrentlyHovered) {
+                                if (isCurrentlyHovered) {
+                                    onHoverDay(dayNumber, currentDisplayMonth, currentDisplayYear)
+                                }
+                            }
+
+                            // Distinct styling for hover vs standard selection
+                            val bgSelected = when {
+                                isCurrentlyHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                isSelected -> MaterialTheme.colorScheme.primary
+                                else -> Color.Transparent
+                            }
+                            val borderSelected = when {
+                                isCurrentlyHovered -> androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                                isSelected -> null
+                                else -> androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            }
                             val textColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
 
                             Box(
@@ -168,7 +213,8 @@ fun MonthlyCalendarView(
                                     .padding(2.dp)
                                     .clip(CircleShape)
                                     .background(bgSelected)
-                                    .border(1.dp, borderSelected, CircleShape)
+                                    .then(if (borderSelected != null) Modifier.border(borderSelected, CircleShape) else Modifier)
+                                    .onGloballyPositioned { cellCoords = it }
                                     .clickable {
                                         val newSelection = Calendar.getInstance().apply {
                                             set(Calendar.YEAR, currentDisplayYear)
@@ -184,7 +230,7 @@ fun MonthlyCalendarView(
                                     Text(
                                         text = dayNumber.toString(),
                                         color = textColor,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        fontWeight = if (isSelected || isCurrentlyHovered) FontWeight.Bold else FontWeight.Normal,
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     if (hasVideo) {
@@ -288,7 +334,9 @@ fun VideoReschedulingDialog(
                         },
                         valueRange = 0f..23f,
                         steps = 23,
-                        modifier = Modifier.fillMaxWidth().testTag("hour_slider")
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("hour_slider")
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
@@ -301,7 +349,9 @@ fun VideoReschedulingDialog(
                         },
                         valueRange = 0f..59f,
                         steps = 59,
-                        modifier = Modifier.fillMaxWidth().testTag("minute_slider")
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("minute_slider")
                     )
                 }
             }
@@ -329,9 +379,18 @@ fun CalendarSchedulerPanel(
     viewModel: YoutubeViewModel,
     videos: List<VideoEntity>
 ) {
+    val context = LocalContext.current
     var selectedDate by remember { mutableStateOf(Calendar.getInstance()) }
     var activeRescheduleVideo by remember { mutableStateOf<VideoEntity?>(null) }
     
+    // Drag and drop parameters
+    var draggedVideo by remember { mutableStateOf<VideoEntity?>(null) }
+    var dragPosition by remember { mutableStateOf(Offset.Zero) }
+
+    var hoveredDayNumber by remember { mutableStateOf<Int?>(null) }
+    var hoveredMonth by remember { mutableStateOf<Int?>(null) }
+    var hoveredYear by remember { mutableStateOf<Int?>(null) }
+
     val filteredVideos = remember(videos, selectedDate) {
         videos.filter { video ->
             val videoCal = Calendar.getInstance().apply { timeInMillis = video.scheduledPublishTime }
@@ -341,83 +400,224 @@ fun CalendarSchedulerPanel(
         }
     }
 
-    Column(
+    var parentCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .onGloballyPositioned { parentCoords = it }
     ) {
-        // Render custom interactive monthly calendar grid
-        MonthlyCalendarView(
-            videos = videos,
-            selectedDate = selectedDate,
-            onDateSelected = { selectedDate = it }
-        )
-
-        val dateString = remember(selectedDate) {
-            SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault()).format(selectedDate.time)
-        }
-
-        // Header for selected date items
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "Scheduled for $dateString",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+            // Render custom interactive monthly calendar grid with Drag & Drop parameters
+            MonthlyCalendarView(
+                videos = videos,
+                selectedDate = selectedDate,
+                onDateSelected = { selectedDate = it },
+                draggedVideo = draggedVideo,
+                dragPosition = dragPosition,
+                onHoverDay = { day, month, year ->
+                    hoveredDayNumber = day
+                    hoveredMonth = month
+                    hoveredYear = year
+                }
             )
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                shape = RoundedCornerShape(8.dp)
+
+            val dateString = remember(selectedDate) {
+                SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault()).format(selectedDate.time)
+            }
+
+            // Header for selected date items
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${filteredVideos.size} videos",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    text = "Scheduled for $dateString",
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-            }
-        }
-
-        if (filteredVideos.isEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.EventNote,
-                        contentDescription = "Empty Schedule",
-                        tint = Color.Gray.copy(alpha = 0.6f),
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "No videos scheduled for this simulated day.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray,
-                        textAlign = TextAlign.Center
+                        text = "${filteredVideos.size} videos",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
             }
-        } else {
-            filteredVideos.forEach { video ->
-                VideoCalendarItemRow(
-                    video = video,
-                    onRescheduleClick = { activeRescheduleVideo = video },
-                    onDelete = { viewModel.deleteVideoRecord(video.id) }
-                )
+
+            // High Fidelity Tip Banner for Drag and Drop
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Tips",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "💡 Pro Tip: Long-press any video row to drag & drop it directly onto the calendar to reschedule!",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            if (filteredVideos.isEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EventNote,
+                            contentDescription = "Empty Schedule",
+                            tint = Color.Gray.copy(alpha = 0.6f),
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "No videos scheduled for this simulated day.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                filteredVideos.forEach { video ->
+                    VideoCalendarItemRow(
+                        video = video,
+                        draggedVideo = draggedVideo,
+                        onDragStart = { v, offset ->
+                            draggedVideo = v
+                            dragPosition = offset
+                        },
+                        onDrag = { amount ->
+                            dragPosition = dragPosition + amount
+                        },
+                        onDragEnd = {
+                            if (draggedVideo != null && hoveredDayNumber != null && hoveredMonth != null && hoveredYear != null) {
+                                val originalCal = Calendar.getInstance().apply { timeInMillis = draggedVideo!!.scheduledPublishTime }
+                                val hour = originalCal.get(Calendar.HOUR_OF_DAY)
+                                val minute = originalCal.get(Calendar.MINUTE)
+
+                                val destinationCal = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, hoveredYear!!)
+                                    set(Calendar.MONTH, hoveredMonth!!)
+                                    set(Calendar.DAY_OF_MONTH, hoveredDayNumber!!)
+                                    set(Calendar.HOUR_OF_DAY, hour)
+                                    set(Calendar.MINUTE, minute)
+                                }
+
+                                viewModel.updateVideoSchedule(draggedVideo!!.id, destinationCal.timeInMillis)
+                                val format = SimpleDateFormat("MMM dd", Locale.getDefault()).format(destinationCal.time)
+                                Toast.makeText(context, "Rescheduled to $format via Drag-and-Drop!", Toast.LENGTH_SHORT).show()
+
+                                // Transition current viewed schedule day to match the drop destination
+                                selectedDate = destinationCal
+                            }
+                            draggedVideo = null
+                            dragPosition = Offset.Zero
+                            hoveredDayNumber = null
+                            hoveredMonth = null
+                            hoveredYear = null
+                        },
+                        onDragCancel = {
+                            draggedVideo = null
+                            dragPosition = Offset.Zero
+                            hoveredDayNumber = null
+                            hoveredMonth = null
+                            hoveredYear = null
+                        },
+                        onRescheduleClick = { activeRescheduleVideo = video },
+                        onDelete = { viewModel.deleteVideoRecord(video.id) }
+                    )
+                }
+            }
+        }
+
+        // Live Floating Drag Preview Overlay
+        if (draggedVideo != null && parentCoords != null) {
+            val parentWindowPos = parentCoords!!.localToWindow(Offset.Zero)
+            val computedLocalOffset = dragPosition - parentWindowPos
+            val density = LocalDensity.current
+
+            val localOffsetX = with(density) { (computedLocalOffset.x - 120.dp.toPx()).toDp() }
+            val localOffsetY = with(density) { (computedLocalOffset.y - 45.dp.toPx()).toDp() }
+
+            Box(
+                modifier = Modifier
+                    .offset(x = localOffsetX, y = localOffsetY)
+                    .width(280.dp)
+                    .graphicsLayer {
+                        alpha = 0.90f
+                        scaleX = 1.05f
+                        scaleY = 1.05f
+                        shadowElevation = 8.dp.toPx()
+                    }
+                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp))
+                    .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarViewMonth,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = if (hoveredDayNumber != null) {
+                                "Drop for Date: ${hoveredDayNumber} day"
+                            } else {
+                                "Hold & Drag over Month day"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (draggedVideo!!.optimizedTitle.isNotEmpty()) draggedVideo!!.optimizedTitle else draggedVideo!!.trendingTopic,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
@@ -440,16 +640,50 @@ fun CalendarSchedulerPanel(
 @Composable
 fun VideoCalendarItemRow(
     video: VideoEntity,
+    draggedVideo: VideoEntity?,
+    onDragStart: (VideoEntity, Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onRescheduleClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var isExpanded by remember { mutableStateOf(false) }
     val timeFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
     val formattedTime = remember(video.scheduledPublishTime) { timeFormat.format(Date(video.scheduledPublishTime)) }
 
+    val isThisItemDragged = draggedVideo?.id == video.id
+    val cardAlpha = if (isThisItemDragged) 0.40f else 1.0f
+
+    var itemCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-        shape = RoundedCornerShape(12.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = cardAlpha }
+            .onGloballyPositioned { itemCoords = it }
+            .pointerInput(video.id) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { touchOffset ->
+                        itemCoords?.let { coords ->
+                            if (coords.isAttached) {
+                                val windowPosition = coords.localToWindow(touchOffset)
+                                onDragStart(video, windowPosition)
+                            }
+                        }
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount)
+                    },
+                    onDragEnd = { onDragEnd() },
+                    onDragCancel = { onDragCancel() }
+                )
+            }
+            .clickable { isExpanded = !isExpanded },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isExpanded) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null
     ) {
         Column(
             modifier = Modifier
@@ -466,6 +700,12 @@ fun VideoCalendarItemRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
+                        imageVector = Icons.Default.DragIndicator,
+                        contentDescription = "Drag to Reschedule",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Icon(
                         imageVector = Icons.Default.Schedule,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
@@ -477,12 +717,31 @@ fun VideoCalendarItemRow(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    
+                    // Status Badge
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (video.status == "PUBLISHED") Color(0xFFE6F4EA) else Color(0xFFFEF7E0)
+                        ),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = video.status,
+                            color = if (video.status == "PUBLISHED") Color(0xFF137333) else Color(0xFFB06000),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            fontSize = 8.sp
+                        )
+                    }
                 }
                 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(
                         onClick = onRescheduleClick,
-                        modifier = Modifier.size(32.dp).testTag("calendar_reschedule_action_${video.id}")
+                        modifier = Modifier
+                            .size(32.dp)
+                            .testTag("calendar_reschedule_action_${video.id}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.EditCalendar,
@@ -515,13 +774,220 @@ fun VideoCalendarItemRow(
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Niche: ${video.niche}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = if (isExpanded) "Hide Metrics" else "Show Performance Metrics",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
 
-            Text(
-                text = "Niche: ${video.niche}",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray
+            // Expandable high fidelity Predicted vs. Actual Metrics Section
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                VideoPerformanceIndicators(video = video)
+            }
+        }
+    }
+}
+
+@Composable
+fun VideoPerformanceIndicators(video: VideoEntity) {
+    val predCtr = remember(video.id) { 6.2f + (video.id * 1.3f) % 5f }
+    val actualCtr = remember(video.id, video.views) {
+        if (video.views > 0) {
+            (predCtr + ((video.views % 21).toFloat() - 10f) / 10f).coerceAtLeast(1.5f)
+        } else {
+            0.0f
+        }
+    }
+    
+    val predictedViews = remember(video.id) { 1200L + (video.id * 431 % 4000) }
+    val actualViews = video.views
+    
+    val viewsProgress = if (predictedViews > 0) {
+        (actualViews.toFloat() / predictedViews.toFloat()).coerceIn(0f, 2f)
+    } else {
+        0f
+    }
+    
+    val isPublished = video.status == "PUBLISHED"
+    
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .background(
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                RoundedCornerShape(8.dp)
             )
+            .padding(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "📊 Performance Forecast",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = if (isPublished) "Live Analysis" else "Estimated Projection",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isPublished) Color(0xFF10B981) else Color.Gray,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Views comparison
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Views Target Progress",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "${String.format("%,d", actualViews)} / ${String.format("%,d", predictedViews)} views",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(4.dp))
+        
+        val progressColor = when {
+            !isPublished -> MaterialTheme.colorScheme.outlineVariant
+            viewsProgress >= 1.0f -> Color(0xFF10B981) // High performer green
+            viewsProgress >= 0.7f -> MaterialTheme.colorScheme.primary // Average pink
+            else -> Color(0xFFEF4444) // Underperformer red
+        }
+        
+        LinearProgressIndicator(
+            progress = { if (isPublished) viewsProgress.coerceAtMost(1f) else 0.1f },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(CircleShape),
+            color = progressColor,
+            trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+        )
+        
+        if (isPublished) {
+            Text(
+                text = if (viewsProgress >= 1.0f) {
+                    "🎉 Exceeded prediction by ${(viewsProgress * 100 - 100).toInt()}%!"
+                } else {
+                    "Direct views are running at ${(viewsProgress * 100).toInt()}% of predicted goal."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (viewsProgress >= 1.0f) Color(0xFF10B981) else Color.Gray,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        // CTR Comparison
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Pred CTR
+            Card(
+                modifier = Modifier.weight(1f),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(6.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("PREDICTED CTR", style = MaterialTheme.typography.labelSmall, color = Color.Gray, fontSize = 8.sp)
+                    Text(String.format("%.1f%%", predCtr), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+            
+            // Actual CTR
+            Card(
+                modifier = Modifier.weight(1f),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isPublished && actualCtr >= predCtr) Color(0xFFECFDF5) else MaterialTheme.colorScheme.surface
+                ),
+                shape = RoundedCornerShape(6.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isPublished) {
+                        if (actualCtr >= predCtr) Color(0xFF10B981) else Color(0xFFEF4444)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("ACTUAL CTR", style = MaterialTheme.typography.labelSmall, color = Color.Gray, fontSize = 8.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (isPublished) String.format("%.1f%%", actualCtr) else "--",
+                            style = MaterialTheme.typography.titleSmall, 
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isPublished) {
+                                if (actualCtr >= predCtr) Color(0xFF047857) else Color(0xFFB91C1C)
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                        if (isPublished) {
+                            Spacer(modifier = Modifier.width(2.dp))
+                            val diff = actualCtr - predCtr
+                            Icon(
+                                imageVector = if (diff >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                contentDescription = null,
+                                tint = if (diff >= 0) Color(0xFF10B981) else Color(0xFFEF4444),
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

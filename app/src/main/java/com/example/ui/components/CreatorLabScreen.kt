@@ -55,6 +55,16 @@ import androidx.compose.foundation.shape.CircleShape
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreatorLabScreen(viewModel: YoutubeViewModel) {
+    if (viewModel.isSharingSessionActive) {
+        SocialMediaShareStudio(viewModel = viewModel)
+        return
+    }
+
+    if (viewModel.isDraftingSessionActive) {
+        VideoVisualDraftsStudio(viewModel = viewModel)
+        return
+    }
+
     val focusManager = LocalFocusManager.current
     var nicheInput by remember { mutableStateOf(viewModel.activeNiche) }
     
@@ -635,6 +645,31 @@ fun CreatorLabScreen(viewModel: YoutubeViewModel) {
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
+
+                        Button(
+                            onClick = {
+                                val currentVideo = com.example.data.VideoEntity(
+                                    niche = viewModel.activeNiche,
+                                    trendingTopic = viewModel.selectedTopic.ifEmpty { "Trending AI Concept" },
+                                    script = viewModel.generatedScript,
+                                    optimizedTitle = viewModel.optimizedTitle,
+                                    thumbnailUrl = viewModel.generatedThumbnail,
+                                    status = "SCRIPTED"
+                                )
+                                viewModel.openDraftingStudio(currentVideo)
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("drafts_from_lab_trigger"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.MovieFilter, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("🎬 Generate Video Visual Drafts storyboard", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         AIVoiceSynthesizerPanel(
                             scriptText = viewModel.generatedScript,
