@@ -1,0 +1,18 @@
+{
+  "name": "youtube-automation-server",
+  "version": "1.0.0",
+  "description": "Headless 24/7 YouTube Automation System with Google Gemini & OpenAI API support and persistent SQLite3 logs storage.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "setup": "node setup.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "openai": "^4.76.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  }
+}
