@@ -1,5 +1,5 @@
 {
-  "name": "TubeAutomate",
+  "name": "vidZest ai",
   "description": "An AI-powered YouTube automation manager and simulation dashboard supporting content research, scripts, visual thumbnail generation, and adaptive scheduling.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

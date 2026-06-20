@@ -103,7 +103,7 @@ class YoutubeViewModel(application: Application) : AndroidViewModel(application)
             repository.log(
                 agent = "System",
                 level = "INFO",
-                message = "TubeAutomate dashboard initialized.",
+                message = "vidZest ai dashboard initialized.",
                 details = "Local Room SQLite persistent DB connected. Configs loaded safely."
             )
         }

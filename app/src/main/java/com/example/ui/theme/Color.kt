@@ -2,10 +2,20 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// Premium Magenta/Rose Pink Theme Colors
+val PinkPrimary = Color(0xFFEC4899)      // Hot Pink
+val PinkSecondary = Color(0xFFF43F5E)    // Rose Pink
+val PinkTertiary = Color(0xFFDB2777)     // Deep Magenta
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// Dark Scheme
+val DarkBackground = Color(0xFF180A0F)   // Dark rose ash background
+val DarkSurface = Color(0xFF231117)      // Slightly lighter rose surface
+val DarkPrimaryContainer = Color(0xFF831843)
+val DarkOnPrimaryContainer = Color(0xFFFCE7F3)
+
+// Light Scheme
+val LightBackground = Color(0xFFFFF1F2)  // Soft rose milk background
+val LightSurface = Color(0xFFFFFFFF)
+val LightPrimaryContainer = Color(0xFFFFE4E6)
+val LightOnPrimaryContainer = Color(0xFF9F1239)
+
